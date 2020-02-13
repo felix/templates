@@ -31,7 +31,7 @@ func New(opts ...Option) (*Templates, error) {
 			return nil, err
 		}
 	}
-	srcs, err := readTemplates(out.base, "."+out.extension)
+	srcs, err := readTemplates(out.base, out.extension)
 	if err != nil {
 		return nil, err
 	}
@@ -104,8 +104,9 @@ func (t *Templates) WriteTo(w io.Writer) (int64, error) {
 		Package   string
 		Base      string
 		FName     string
+		Extension string
 		Templates map[string]string
-	}{t.pkg, t.base, t.fName, data}); err != nil {
+	}{t.pkg, t.base, t.fName, t.extension, data}); err != nil {
 		return 0, err
 	}
 	return buf.WriteTo(w)
@@ -121,9 +122,9 @@ import (
 
 func {{ .FName }}(n string) ([]byte, error) {
 	var templates = map[string]string {
-{{ $name, $data := range .Templates }}
+{{- range $name, $data := .Templates }}
 		"{{ $name }}": ` + "`" + `{{ $data }}` + "`" + `,
-{{ end }}
+{{- end }}
 	}
 
 	d, ok := templates[n]
