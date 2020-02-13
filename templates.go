@@ -39,6 +39,13 @@ func New(opts ...Option) (*Templates, error) {
 	return out, nil
 }
 
+func Must(t *Templates, err error) *Templates {
+	if err != nil {
+		panic(err)
+	}
+	return t
+}
+
 type Option func(*Templates) error
 
 func Base(p string) Option {
@@ -55,6 +62,7 @@ func Extension(e string) Option {
 		return nil
 	}
 }
+
 func Package(p string) Option {
 	return func(t *Templates) error {
 		t.pkg = p
@@ -100,19 +108,20 @@ func (t *Templates) WriteTo(w io.Writer) (int64, error) {
 		data[k] = base64.StdEncoding.EncodeToString(b)
 	}
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, struct {
-		Package   string
-		Base      string
-		FName     string
-		Extension string
-		Templates map[string]string
-	}{t.pkg, t.base, t.fName, t.extension, data}); err != nil {
+	vars := map[string]interface{}{
+		"package":   t.pkg,
+		"base":      t.base,
+		"function":  t.fName,
+		"extension": t.extension,
+		"templates": data,
+	}
+	if err := tmpl.Execute(&buf, vars); err != nil {
 		return 0, err
 	}
 	return buf.WriteTo(w)
 }
 
-const loader = `package {{ .Package }}
+const loader = `package {{ .package }}
 
 import (
 	"encoding/base64"
@@ -120,22 +129,30 @@ import (
 	"io/ioutil"
 )
 
-func {{ .FName }}(n string) ([]byte, error) {
+func {{ .function }}(n string) ([]byte, error) {
 	var templates = map[string]string {
-{{- range $name, $data := .Templates }}
+{{- range $name, $data := .templates }}
 		"{{ $name }}": ` + "`" + `{{ $data }}` + "`" + `,
 {{- end }}
 	}
 
 	d, ok := templates[n]
 	if !ok {
-		return nil, fmt.Errorf("template not found")
+		return nil, fmt.Errorf("template %q not found", n)
 	}
 	// Check for overriding file
-	b, err := ioutil.ReadFile("{{ .Base }}" + n + "{{ .Extension }}")
+	b, err := ioutil.ReadFile("{{ .base }}" + n + "{{ .extension }}")
 	if err == nil && b != nil {
 		return b, nil
 	}
 	return base64.StdEncoding.DecodeString(d)
+}
+
+func {{ .function }}Must(n string) []byte {
+	b, err := {{ .function }}(n)
+	if err != nil {
+		panic(err)
+	}
+	return b
 }
 `
