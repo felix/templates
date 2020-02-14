@@ -16,6 +16,8 @@ type Templates struct {
 	pkg       string
 	extension string
 	fName     string
+	htmlTmpl  bool
+	textTmpl  bool
 	sources   map[string]io.ReadCloser
 }
 
@@ -70,6 +72,20 @@ func Package(p string) Option {
 	}
 }
 
+func EnableHTMLTemplates() Option {
+	return func(t *Templates) error {
+		t.htmlTmpl = true
+		return nil
+	}
+}
+
+func EnableTextTemplates() Option {
+	return func(t *Templates) error {
+		t.textTmpl = true
+		return nil
+	}
+}
+
 func readTemplates(root, extension string) (map[string]io.ReadCloser, error) {
 	out := make(map[string]io.ReadCloser)
 	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -114,6 +130,8 @@ func (t *Templates) WriteTo(w io.Writer) (int64, error) {
 		"function":  t.fName,
 		"extension": t.extension,
 		"templates": data,
+		"textTmpl":  t.textTmpl,
+		"htmlTmpl":  t.htmlTmpl,
 	}
 	if err := tmpl.Execute(&buf, vars); err != nil {
 		return 0, err
@@ -126,7 +144,13 @@ const loader = `package {{ .package }}
 import (
 	"encoding/base64"
 	"fmt"
+{{- if .htmlTmpl }}
+	html "html/template"
+{{- end }}
 	"io/ioutil"
+{{- if .textTmpl }}
+	text "text/template"
+{{- end }}
 )
 
 func {{ .function }}(n string) ([]byte, error) {
@@ -155,4 +179,38 @@ func {{ .function }}Must(n string) []byte {
 	}
 	return b
 }
+{{- if .textTmpl }}
+
+func {{ .function }}Text(names []string, funcs text.FuncMap) (*text.Template, error) {
+	var out *html.Template
+	for _, n := range names {
+		data, err := {{ .function }}(n)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			out = html.New(n).Funcs(funcs)
+		}
+		out.Parse(string(data))
+	}
+	return out, nil
+}
+{{- end }}
+{{- if .htmlTmpl }}
+
+func {{ .function }}HTML(names []string, funcs html.FuncMap) (*html.Template, error) {
+	var out *html.Template
+	for _, n := range names {
+		data, err := {{ .function }}(n)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			out = html.New(n).Funcs(funcs)
+		}
+		out.Parse(string(data))
+	}
+	return out, nil
+}
+{{- end }}
 `
