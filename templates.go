@@ -3,19 +3,22 @@ package templates
 import (
 	"bytes"
 	"encoding/base64"
+	"fmt"
+	"html/template"
 	"io"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"text/template"
+	"sync"
 )
 
 type Templates struct {
 	base      string
 	pkg       string
 	extension string
-	fName     string
+	prefix    string
 	htmlTmpl  bool
 	textTmpl  bool
 	sources   map[string]io.ReadCloser
@@ -26,7 +29,7 @@ func New(opts ...Option) (*Templates, error) {
 		pkg:       "main",
 		extension: ".tmpl",
 		base:      "./",
-		fName:     "loadTemplate",
+		prefix:    "",
 	}
 	for _, o := range opts {
 		if err := o(out); err != nil {
@@ -86,6 +89,13 @@ func EnableTextTemplates() Option {
 	}
 }
 
+func FunctionPrefix(p string) Option {
+	return func(t *Templates) error {
+		t.prefix = p
+		return nil
+	}
+}
+
 func readTemplates(root, extension string) (map[string]io.ReadCloser, error) {
 	out := make(map[string]io.ReadCloser)
 	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -121,13 +131,13 @@ func (t *Templates) WriteTo(w io.Writer) (int64, error) {
 		if err != nil {
 			return 0, err
 		}
-		data[k] = base64.StdEncoding.EncodeToString(b)
+		data[k] = base64.RawURLEncoding.EncodeToString(b)
 	}
 	var buf bytes.Buffer
 	vars := map[string]interface{}{
 		"package":   t.pkg,
 		"base":      t.base,
-		"function":  t.fName,
+		"prefix":    t.prefix,
 		"extension": t.extension,
 		"templates": data,
 		"textTmpl":  t.textTmpl,
@@ -137,6 +147,40 @@ func (t *Templates) WriteTo(w io.Writer) (int64, error) {
 		return 0, err
 	}
 	return buf.WriteTo(w)
+}
+
+type Renderer func(http.ResponseWriter, string, interface{}) error
+
+func (r Renderer) Render(w http.ResponseWriter, name string, data interface{}) error {
+	return r(w, name, data)
+}
+
+func NewRenderer(tmpls map[string]*template.Template) Renderer {
+	var bufPool = sync.Pool{
+		New: func() interface{} {
+			return new(bytes.Buffer)
+		},
+	}
+
+	return func(w http.ResponseWriter, name string, data interface{}) error {
+		tmpl, ok := tmpls[name]
+		if !ok {
+			return fmt.Errorf("missing template %s", name)
+		}
+		fmt.Println("rendering", name)
+		fmt.Println(tmpl.DefinedTemplates())
+
+		buf := bufPool.Get().(*bytes.Buffer)
+		defer bufPool.Put(buf)
+
+		if err := tmpl.ExecuteTemplate(buf, name, data); err != nil {
+			return err
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		buf.WriteTo(w)
+		return nil
+	}
 }
 
 const loader = `package {{ .package }}
@@ -153,7 +197,7 @@ import (
 {{- end }}
 )
 
-func {{ .function }}(n string) ([]byte, error) {
+func {{ .prefix }}LoadTemplate(n string) ([]byte, error) {
 	var templates = map[string]string {
 {{- range $name, $data := .templates }}
 		"{{ $name }}": ` + "`" + `{{ $data }}` + "`" + `,
@@ -169,11 +213,15 @@ func {{ .function }}(n string) ([]byte, error) {
 	if err == nil && b != nil {
 		return b, nil
 	}
-	return base64.StdEncoding.DecodeString(d)
+	data, err := base64.RawURLEncoding.DecodeString(d)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load template %q: %w", n, err)
+	}
+	return data, nil
 }
 
-func {{ .function }}Must(n string) []byte {
-	b, err := {{ .function }}(n)
+func {{ .prefix }}MustLoadTemplate(n string) []byte {
+	b, err := {{ .prefix }}LoadTemplate(n)
 	if err != nil {
 		panic(err)
 	}
@@ -181,10 +229,10 @@ func {{ .function }}Must(n string) []byte {
 }
 {{- if .textTmpl }}
 
-func {{ .function }}Text(names []string, funcs text.FuncMap) (*text.Template, error) {
+func {{ .prefix }}LoadTextTemplate(names []string, funcs text.FuncMap) (*text.Template, error) {
 	var out *html.Template
 	for _, n := range names {
-		data, err := {{ .function }}(n)
+		data, err := {{ .prefix }}LoadTemplate(n)
 		if err != nil {
 			return nil, err
 		}
@@ -198,17 +246,36 @@ func {{ .function }}Text(names []string, funcs text.FuncMap) (*text.Template, er
 {{- end }}
 {{- if .htmlTmpl }}
 
-func {{ .function }}HTML(names []string, funcs html.FuncMap) (*html.Template, error) {
+// {{ .prefix }}LoadHTMLTemplate loads all templates listed separately.
+func {{ .prefix }}LoadHTMLTemplate(names []string, funcs html.FuncMap) (*html.Template, error) {
 	var out *html.Template
 	for _, n := range names {
-		data, err := {{ .function }}(n)
+		data, err := {{ .prefix }}LoadTemplate(n)
 		if err != nil {
 			return nil, err
 		}
 		if out == nil {
+			// The first one is used for the name
 			out = html.New(n).Funcs(funcs)
 		}
 		out.Parse(string(data))
+	}
+	return out, nil
+}
+
+// {{ .prefix }}LoadHTMLTemplateMap loads all templates listed grouped into named templates.
+func {{ .prefix }}LoadHTMLTemplateMap(tmplMap map[string][]string, funcs html.FuncMap) (map[string]*html.Template, error) {
+	out := make(map[string]*html.Template)
+	for n, tmpls := range tmplMap {
+		tmp := html.New(n).Funcs(funcs)
+		for _, t := range tmpls {
+			data, err := {{ .prefix }}LoadTemplate(t)
+			if err != nil {
+				return nil, err
+			}
+			tmp.Parse(string(data))
+		}
+		out[n] = tmp
 	}
 	return out, nil
 }
