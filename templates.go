@@ -27,7 +27,7 @@ type Templates struct {
 func New(opts ...Option) (*Templates, error) {
 	out := &Templates{
 		pkg:       "main",
-		extension: ".tmpl",
+		extension: "",
 		base:      "./",
 		prefix:    "",
 	}
@@ -105,11 +105,14 @@ func readTemplates(root, extension string) (map[string]io.ReadCloser, error) {
 		if info.IsDir() {
 			return nil
 		}
-		if !strings.HasSuffix(path, extension) {
-			return nil
-		}
+
 		varName := strings.TrimPrefix(path, root)
-		varName = strings.TrimSuffix(varName, extension)
+		if extension != "" {
+			if !strings.HasSuffix(path, extension) {
+				return nil
+			}
+			varName = strings.TrimSuffix(varName, extension)
+		}
 		rc, err := os.Open(path)
 		if err != nil {
 			return err
