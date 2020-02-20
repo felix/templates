@@ -15,28 +15,28 @@ import (
 )
 
 type Templates struct {
-	base      string
-	pkg       string
-	extension string
-	prefix    string
-	htmlTmpl  bool
-	textTmpl  bool
-	sources   map[string]io.ReadCloser
+	base       string
+	pkg        string
+	extensions []string
+	prefix     string
+	htmlTmpl   bool
+	textTmpl   bool
+	sources    map[string]io.ReadCloser
 }
 
 func New(opts ...Option) (*Templates, error) {
 	out := &Templates{
-		pkg:       "main",
-		extension: "",
-		base:      "./",
-		prefix:    "",
+		pkg:        "main",
+		extensions: nil,
+		base:       "./",
+		prefix:     "",
 	}
 	for _, o := range opts {
 		if err := o(out); err != nil {
 			return nil, err
 		}
 	}
-	srcs, err := readTemplates(out.base, out.extension)
+	srcs, err := readTemplates(out.base, out.extensions)
 	if err != nil {
 		return nil, err
 	}
@@ -61,9 +61,9 @@ func Base(p string) Option {
 	}
 }
 
-func Extension(e string) Option {
+func Extensions(e []string) Option {
 	return func(t *Templates) error {
-		t.extension = e
+		t.extensions = e
 		return nil
 	}
 }
@@ -96,7 +96,19 @@ func FunctionPrefix(p string) Option {
 	}
 }
 
-func readTemplates(root, extension string) (map[string]io.ReadCloser, error) {
+func hasSuffix(path string, extensions []string) bool {
+	if extensions == nil {
+		return true
+	}
+	for _, ext := range extensions {
+		if strings.HasSuffix(path, ext) {
+			return true
+		}
+	}
+	return false
+}
+
+func readTemplates(root string, extensions []string) (map[string]io.ReadCloser, error) {
 	out := make(map[string]io.ReadCloser)
 	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -107,11 +119,8 @@ func readTemplates(root, extension string) (map[string]io.ReadCloser, error) {
 		}
 
 		varName := strings.TrimPrefix(path, root)
-		if extension != "" {
-			if !strings.HasSuffix(path, extension) {
-				return nil
-			}
-			varName = strings.TrimSuffix(varName, extension)
+		if !hasSuffix(path, extensions) {
+			return nil
 		}
 		rc, err := os.Open(path)
 		if err != nil {
@@ -141,7 +150,6 @@ func (t *Templates) WriteTo(w io.Writer) (int64, error) {
 		"package":   t.pkg,
 		"base":      t.base,
 		"prefix":    t.prefix,
-		"extension": t.extension,
 		"templates": data,
 		"textTmpl":  t.textTmpl,
 		"htmlTmpl":  t.htmlTmpl,
@@ -212,7 +220,7 @@ func {{ .prefix }}LoadTemplate(n string) ([]byte, error) {
 		return nil, fmt.Errorf("template %q not found", n)
 	}
 	// Check for overriding file
-	b, err := ioutil.ReadFile("{{ .base }}" + n + "{{ .extension }}")
+	b, err := ioutil.ReadFile("{{ .base }}" + n)
 	if err == nil && b != nil {
 		return b, nil
 	}
