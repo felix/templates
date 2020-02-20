@@ -178,8 +178,8 @@ func NewRenderer(tmpls map[string]*template.Template) Renderer {
 		if !ok {
 			return fmt.Errorf("missing template %s", name)
 		}
-		fmt.Println("rendering", name)
-		fmt.Println(tmpl.DefinedTemplates())
+		//fmt.Println("rendering", name)
+		//fmt.Println(tmpl.DefinedTemplates())
 
 		buf := bufPool.Get().(*bytes.Buffer)
 		defer bufPool.Put(buf)
