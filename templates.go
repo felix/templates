@@ -48,7 +48,7 @@ func New(opts ...Option) (*Templates, error) {
 		}
 	}
 	for i, m := range out.mappings {
-		log("reading templates from", m.Source, "with extensions", m.Extensions)
+		log("templates: reading from", m.Source, "with extensions", m.Extensions)
 		if err := readTemplates(out.base, &m); err != nil {
 			return nil, err
 		}
@@ -84,17 +84,15 @@ func readTemplates(base string, m *Mapping) error {
 	src := filepath.Join(base, m.Source)
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			log("failed", err)
+			log("templates: failed to read", err)
 			return err
 		}
 		if info.IsDir() {
 			return nil
 		}
 
-		log("considering", path)
-		log("root", m.Source)
+		log("templates: considering", path)
 		varName, _ := filepath.Rel(src, path)
-		log("varName", varName)
 		if !validSuffix(path, m.Extensions) {
 			return nil
 		}
@@ -103,7 +101,7 @@ func readTemplates(base string, m *Mapping) error {
 		if err != nil {
 			return err
 		}
-		log("found template", varName)
+		log("templates: found", varName)
 		return nil
 	})
 }

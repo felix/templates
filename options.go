@@ -16,10 +16,10 @@ func Base(s string) Option {
 	}
 }
 
-func Logger(f func(...interface{})) Option {
+func Debug(f func(...interface{})) Option {
 	return func(t *Templates) error {
 		log = f
-		log("logger set")
+		log("debugging templates")
 		return nil
 	}
 }
